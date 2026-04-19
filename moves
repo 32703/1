@@ -1,0 +1,403 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+
+local Window = Rayfield:CreateWindow({
+	Name = "1",
+	LoadingTitle = "1",
+	LoadingSubtitle = "1",
+	Theme = "DarkBlue",
+	ToggleUIKeybind = "K",
+	ConfigurationSaving = {
+		Enabled = true,
+		FolderName = "UnifiedHub",
+		FileName = "Config"
+	}
+})
+
+local OrbitTab = Window:CreateTab("orbit", "orbit")
+local TeleportTab = Window:CreateTab("teleport", "user")
+local WalkFlingTab = Window:CreateTab("walkfling", "zap")
+
+local orbitConnection
+local deathConnection
+local seatConnection
+
+local selectedPlayer
+local originalCameraSubject
+
+local speed = 90
+local distance = 6
+
+local function getRoot(character)
+	return character and character:FindFirstChild("HumanoidRootPart")
+end
+
+local function unorbit()
+	if orbitConnection then orbitConnection:Disconnect() orbitConnection = nil end
+	if deathConnection then deathConnection:Disconnect() deathConnection = nil end
+	if seatConnection then seatConnection:Disconnect() seatConnection = nil end
+
+	if originalCameraSubject then
+		workspace.CurrentCamera.CameraSubject = originalCameraSubject
+	end
+	originalCameraSubject = nil
+end
+
+local function startOrbit()
+	unorbit()
+
+	if not selectedPlayer or not selectedPlayer.Character then return end
+
+	local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+	local root = getRoot(character)
+	local targetRoot = getRoot(selectedPlayer.Character)
+
+	if not root or not targetRoot or not humanoid then return end
+
+	originalCameraSubject = humanoid
+
+	local rotation = 0
+
+	local targetHumanoid = selectedPlayer.Character:FindFirstChildWhichIsA("Humanoid")
+	if targetHumanoid then
+		workspace.CurrentCamera.CameraSubject = targetHumanoid
+	end
+
+	orbitConnection = RunService.Heartbeat:Connect(function(dt)
+
+		if not selectedPlayer or not selectedPlayer.Character then
+			unorbit()
+			return
+		end
+
+		local targetCharacter = selectedPlayer.Character
+		local targetRoot = getRoot(targetCharacter)
+		local targetHumanoid = targetCharacter:FindFirstChildWhichIsA("Humanoid")
+
+		if targetHumanoid and workspace.CurrentCamera.CameraSubject ~= targetHumanoid then
+			workspace.CurrentCamera.CameraSubject = targetHumanoid
+		end
+
+		if targetRoot and root and root.Parent then
+			rotation += speed * dt
+			local angleRad = math.rad(rotation)
+
+			local offset = Vector3.new(
+				math.cos(angleRad) * distance,
+				0,
+				math.sin(angleRad) * distance
+			)
+
+			local targetPos = targetRoot.Position
+
+			root.CFrame = CFrame.new(targetPos + offset, targetPos)
+		end
+	end)
+
+	deathConnection = humanoid.Died:Connect(unorbit)
+	seatConnection = humanoid.Seated:Connect(function(active)
+		if active then unorbit() end
+	end)
+end
+
+OrbitTab:CreateSection("target")
+
+local function getPlayerDisplayNames()
+	local list = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer then
+			table.insert(list, p.DisplayName .. " (@" .. p.Name .. ")")
+		end
+	end
+	return list
+end
+
+local function getPlayerByDisplay(name)
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.DisplayName .. " (@" .. p.Name .. ")" == name then
+			return p
+		end
+	end
+end
+
+local OrbitDropdown
+OrbitDropdown = OrbitTab:CreateDropdown({
+	Name = "select player",
+	Options = getPlayerDisplayNames(),
+	CurrentOption = {},
+	MultipleOptions = false,
+	Callback = function(opt)
+		selectedPlayer = getPlayerByDisplay(opt[1])
+	end
+})
+
+OrbitTab:CreateSection("settings")
+
+OrbitTab:CreateInput({
+	Name = "speed",
+	PlaceholderText = "90",
+	RemoveTextAfterFocusLost = false,
+	Callback = function(v)
+		local n = tonumber(v)
+		if n then speed = n end
+	end
+})
+
+OrbitTab:CreateInput({
+	Name = "distance",
+	PlaceholderText = "6",
+	RemoveTextAfterFocusLost = false,
+	Callback = function(v)
+		local n = tonumber(v)
+		if n then distance = n end
+	end
+})
+
+OrbitTab:CreateButton({
+	Name = "start orbit",
+	Callback = startOrbit
+})
+
+OrbitTab:CreateButton({
+	Name = "stop orbit",
+	Callback = unorbit
+})
+
+Players.PlayerAdded:Connect(function()
+	OrbitDropdown:Refresh(getPlayerDisplayNames())
+end)
+
+Players.PlayerRemoving:Connect(function()
+	OrbitDropdown:Refresh(getPlayerDisplayNames())
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+	task.wait(1)
+	unorbit()
+end)
+
+local positionBehind = true
+local distanceFromTarget = 4
+local teleportEnabled = false
+local cyclicTeleportEnabled = false
+local selectedSinglePlayer = nil
+local selectedPlayersList = {}
+local currentIndex = 1
+
+local function teleportToPlayer(targetPlayer)
+	if not targetPlayer.Character or not targetPlayer.Character:FindFirstChild("HumanoidRootPart") then return end
+	if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return end
+
+	local localHRP = LocalPlayer.Character.HumanoidRootPart
+	local targetHRP = targetPlayer.Character.HumanoidRootPart
+
+	local offset = (positionBehind and -1 or 1) * targetHRP.CFrame.LookVector * distanceFromTarget
+	localHRP.CFrame = CFrame.new(targetHRP.Position + offset, targetHRP.Position)
+end
+
+local function getDisplayNames()
+	local list = {}
+	for _, p in pairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer then
+			table.insert(list, p.DisplayName .. " (@" .. p.Name .. ")")
+		end
+	end
+	return list
+end
+
+local function getPlayerByDisplay(name)
+	for _, p in pairs(Players:GetPlayers()) do
+		if p.DisplayName .. " (@" .. p.Name .. ")" == name then
+			return p
+		end
+	end
+end
+
+TeleportTab:CreateSection("single")
+
+local SingleDropdown
+SingleDropdown = TeleportTab:CreateDropdown({
+	Name = "select player",
+	Options = getDisplayNames(),
+	CurrentOption = {},
+	Callback = function(opt)
+		selectedSinglePlayer = getPlayerByDisplay(opt[1])
+	end
+})
+
+TeleportTab:CreateToggle({
+	Name = "teleport",
+	CurrentValue = false,
+	Callback = function(v)
+		teleportEnabled = v
+	end
+})
+
+TeleportTab:CreateSection("cyclic")
+
+local CyclicDropdown
+CyclicDropdown = TeleportTab:CreateDropdown({
+	Name = "select players",
+	Options = getDisplayNames(),
+	CurrentOption = {},
+	MultipleOptions = true,
+	Callback = function(opts)
+		selectedPlayersList = {}
+		for _, name in pairs(opts) do
+			local p = getPlayerByDisplay(name)
+			if p then table.insert(selectedPlayersList, p) end
+		end
+	end
+})
+
+TeleportTab:CreateToggle({
+	Name = "cyclic",
+	CurrentValue = false,
+	Callback = function(v)
+		cyclicTeleportEnabled = v
+	end
+})
+
+TeleportTab:CreateSection("settings")
+
+TeleportTab:CreateToggle({
+	Name = "behind target",
+	CurrentValue = true,
+	Callback = function(v)
+		positionBehind = v
+	end
+})
+
+TeleportTab:CreateSlider({
+	Name = "distance",
+	Range = {0.5, 15},
+	Increment = 0.5,
+	CurrentValue = 4,
+	Callback = function(v)
+		distanceFromTarget = v
+	end
+})
+
+RunService.Heartbeat:Connect(function()
+	if teleportEnabled and selectedSinglePlayer then
+		teleportToPlayer(selectedSinglePlayer)
+	end
+
+	if cyclicTeleportEnabled and #selectedPlayersList > 0 then
+		teleportToPlayer(selectedPlayersList[currentIndex])
+	end
+end)
+
+task.spawn(function()
+	while true do
+		if cyclicTeleportEnabled and #selectedPlayersList > 0 then
+			currentIndex += 1
+			if currentIndex > #selectedPlayersList then currentIndex = 1 end
+		end
+		task.wait(2)
+	end
+end)
+
+Players.PlayerAdded:Connect(function()
+	local names = getDisplayNames()
+	SingleDropdown:Refresh(names)
+	CyclicDropdown:Refresh(names)
+end)
+
+Players.PlayerRemoving:Connect(function()
+	local names = getDisplayNames()
+	SingleDropdown:Refresh(names)
+	CyclicDropdown:Refresh(names)
+end)
+
+local walkflinging = false
+local desiredEnabled = false
+
+local function getRoot(char)
+	return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function noclip(enable)
+	local char = LocalPlayer.Character
+	if not char then return end
+	for _, part in pairs(char:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.CanCollide = not enable
+		end
+	end
+end
+
+local function startWalkFling()
+	if walkflinging then return end
+	walkflinging = true
+
+	local char = LocalPlayer.Character
+	local hum = char and char:FindFirstChildWhichIsA("Humanoid")
+
+	if hum then
+		hum.Died:Connect(function()
+			walkflinging = false
+			noclip(false)
+		end)
+	end
+
+	noclip(true)
+
+	task.spawn(function()
+		local movel = 0.1
+		repeat
+			RunService.Heartbeat:Wait()
+
+			char = LocalPlayer.Character
+			local root = getRoot(char)
+
+			while not (char and root and root.Parent) do
+				RunService.Heartbeat:Wait()
+				char = LocalPlayer.Character
+				root = getRoot(char)
+			end
+
+			local vel = root.Velocity
+			root.Velocity = vel * 10000 + Vector3.new(0, 10000, 0)
+
+			RunService.RenderStepped:Wait()
+			if root then root.Velocity = vel end
+
+			RunService.Stepped:Wait()
+			if root then
+				root.Velocity = vel + Vector3.new(0, movel, 0)
+				movel = -movel
+			end
+		until not walkflinging
+
+		noclip(false)
+	end)
+end
+
+local function stopWalkFling()
+	walkflinging = false
+	noclip(false)
+end
+
+WalkFlingTab:CreateSection("movement")
+
+WalkFlingTab:CreateToggle({
+	Name = "walkfling",
+	CurrentValue = false,
+	Callback = function(v)
+		desiredEnabled = v
+		if v then startWalkFling() else stopWalkFling() end
+	end
+})
+
+LocalPlayer.CharacterAdded:Connect(function()
+	task.wait(0.2)
+	if desiredEnabled then startWalkFling() end
+end)
+
+Rayfield:LoadConfiguration()
